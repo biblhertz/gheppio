@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+
+    <!-- Title and icon are set by the boot script from config.json -->
+    <title>Gheppio</title>
+    <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+
+    <!-- Mapbox GL JS -->
+    <link rel="preconnect" href="https://api.mapbox.com">
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+
+    <!-- Mapbox Geocoder -->
+    <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css">
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
+
+    <!-- Gheppio styles -->
+    <link rel="stylesheet" href="assets/gheppio.css">
+    <link rel="stylesheet" href="assets/custom.css">
+
+    <style>
+        /* Map page: header is fixed so the map fills the remaining viewport */
+        header { position: fixed; z-index: 200; left: 0; right: 0; width: 100vw; }
+    </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header>
+    <a class="header-logo" id="gh-logo-link" href="#">
+        <img id="gh-logo-img" src="assets/logo.svg" alt="" height="32">
+        <div>
+            <strong id="gh-inst-name"></strong>
+
+        </div>
+    </a>
+
+    <nav id="gh-nav">
+        <!-- Navigation links are injected by the boot script from config.json -->
+        <a href="#" id="about-toggle">About</a>
+    </nav>
+
+    <div id="building-bar">
+        <input id="building-input" type="text"
+               placeholder="Search…" autocomplete="off">
+    </div>
+
+    <div id="overlay-bar">
+        <select id="overlay-select">
+            <option value="">Map Overlays</option>
+        </select>
+        <input  id="overlay-param"        type="text" placeholder="Type a name…" style="display:none;">
+        <select id="overlay-param-select" style="display:none;"></select>
+        <button id="overlay-run">Run</button>
+        <span   id="overlay-count"></span>
+        <button id="overlay-clear" style="display:none;">Clear</button>
+    </div>
+</header>
+
+<!-- ── Map and panels ──────────────────────────────────────────────────────── -->
+<div id="map"></div>
+<div id="building-autocomplete"></div>
+<div id="artist-autocomplete"></div>
+<div id="panel-backdrop"></div>
+<div id="myData"></div>
+
+<!-- ── About panel ─────────────────────────────────────────────────────────── -->
+<div id="about-panel" aria-hidden="true">
+    <div id="about-panel-inner">
+        <button id="about-close" aria-label="Close">&times;</button>
+        <h2>About</h2>
+        <p id="gh-about-text"></p>
+        <p id="gh-about-contact"></p>
+    </div>
+</div>
+
+<!-- ── Boot ────────────────────────────────────────────────────────────────── -->
+<script src="queries.js"></script>
+<script type="module">
+    // ============================================================================
+    // GHEPPIO BOOT
+    // Fetches config.json, applies institution strings, loads core modules,
+    // wires the overlay UI, and handles the ?q= URL parameter.
+    // ============================================================================
+
+    // 1 ── Load config ────────────────────────────────────────────────────────────
+
+    const config = await fetch('config.json').then(r => r.json());
+
+    // token.json overrides config.map.token — gitignored, never in the repo.
+    // Silently ignored if absent (production servers set the token in config.json).
+    try {
+        const tok = await fetch('token.json').then(r => r.json());
+        if (tok.token) config.map.token = tok.token;
+    } catch (_) { /* token.json not present — use config.map.token as-is */ }
+
+    // 2 ── Apply institution strings ───────────────────────────────────────────────
+
+    document.title = config.institution.name + ' — Map Hub';
+
+    const logoLink = document.getElementById('gh-logo-link');
+    const logoImg  = document.getElementById('gh-logo-img');
+    if (config.institution.url)  logoLink.href = config.institution.url;
+    if (config.institution.logo) logoImg.src   = config.institution.logo;
+    logoImg.alt = config.institution.name;
+
+    document.getElementById('gh-inst-name').textContent = config.institution.name;
+
+    const aboutText    = document.getElementById('gh-about-text');
+    const aboutContact = document.getElementById('gh-about-contact');
+    if (config.institution.description) aboutText.textContent = config.institution.description;
+    if (config.institution.contact) {
+        aboutContact.innerHTML =
+            `Contact: <a href="mailto:${config.institution.contact}">${config.institution.contact}</a>`;
+    }
+
+    // 3 ── Initialise core modules ─────────────────────────────────────────────────
+
+    import { initLogging, setStatus, getUrlParam } from './core/utils.js';
+    import { initMap, setMapStyle, getMap }         from './core/map.js';
+    import { initInfopad, openEntity, closePanel }  from './core/infopad.js';
+    import { initPanels }                           from './core/panels.js';
+    import { initSearch, wireArtistSearch,
+        getSelectedArtistQID,
+        clearSelectedArtist }                  from './core/search.js';
+    import { runOverlay, clearOverlay }             from './core/sparql.js';
+
+    initLogging(config.DEBUG ?? false);
+
+    const map = await initMap(config);
+
+    initInfopad(config, map);
+    initPanels(config);
+    initSearch(config);
+
+    // 4 ── Load OVERLAY_QUERIES and populate the overlay select ───────────────────
+
+    const sel          = document.getElementById('overlay-select');
+    const paramInput   = document.getElementById('overlay-param');
+    const paramSelect  = document.getElementById('overlay-param-select');
+    const artistAc     = document.getElementById('artist-autocomplete');
+
+    // Populate dropdown from OVERLAY_QUERIES
+    (window.OVERLAY_QUERIES || []).forEach(q => {
+        if (q.group) {
+            const sep = document.createElement('option');
+            sep.disabled     = true;
+            sep.textContent  = '\u2500\u2500 ' + q.group + ' \u2500\u2500';
+            sep.style.color  = '#e09b00';
+            sep.style.fontStyle = 'italic';
+            sel.appendChild(sep);
+            return;
+        }
+        const opt = document.createElement('option');
+        opt.value       = q.id;
+        opt.textContent = q.label;
+        sel.appendChild(opt);
+    });
+
+    // 5 ── Overlay bar wiring ──────────────────────────────────────────────────────
+
+    sel.addEventListener('change', function () {
+        const def = (window.OVERLAY_QUERIES || []).find(q => q.id === this.value);
+        clearSelectedArtist();
+        artistAc.innerHTML   = '';
+        artistAc.style.display = 'none';
+
+        if (def?.param) {
+            if (def.param.type === 'order-select') {
+                paramInput.style.display  = 'none';
+                paramInput.value          = '';
+                paramSelect.innerHTML     = '';
+                def.param.options.forEach(o => {
+                    const opt = document.createElement('option');
+                    opt.value       = o.value;
+                    opt.textContent = o.label;
+                    paramSelect.appendChild(opt);
+                });
+                paramSelect.style.display = 'inline-block';
+
+            } else if (def.param.type === 'artist-search') {
+                paramSelect.style.display = 'none';
+                paramSelect.innerHTML     = '';
+                paramInput.placeholder    = def.param.placeholder ?? 'Type a name\u2026';
+                paramInput.value          = '';
+                paramInput.readOnly       = false;
+                paramInput.style.display  = 'inline-block';
+                // Wire artist autocomplete to the param field
+                wireArtistSearch(
+                    paramInput, artistAc,
+                    config.search?.buildingTerms?.language ?? 'en'
+                );
+
+            } else {
+                // Generic text param (raw QID etc.)
+                paramSelect.style.display = 'none';
+                paramSelect.innerHTML     = '';
+                paramInput.placeholder    = def.param.placeholder ?? 'QID\u2026';
+                paramInput.value          = '';
+                paramInput.readOnly       = false;
+                paramInput.style.display  = 'inline-block';
+            }
+        } else {
+            paramInput.style.display  = 'none';
+            paramInput.value          = '';
+            paramSelect.style.display = 'none';
+        }
+    });
+
+    document.getElementById('overlay-run').addEventListener('click', async () => {
+        const id  = sel.value;
+        if (!id) return;
+        const def = (window.OVERLAY_QUERIES || []).find(q => q.id === id);
+        if (!def) return;
+
+        let param = null;
+        if (def.param?.type === 'artist-search') {
+            param = getSelectedArtistQID();
+            if (!param) { paramInput.focus(); return; }
+        } else if (def.param?.type === 'order-select') {
+            param = paramSelect.value;
+        } else if (def.param) {
+            param = paramInput.value.trim() || null;
+        }
+
+        // Clear entity panel and ?q= param before running
+        closePanel();
+        const { count } = await runOverlay(def.sparql(param), def.label);
+        document.getElementById('overlay-count').textContent =
+            count ? count + ' result' + (count !== 1 ? 's' : '') : '';
+        document.getElementById('overlay-clear').style.display =
+            count ? 'inline-flex' : 'none';
+    });
+
+    document.getElementById('overlay-clear').addEventListener('click', () => {
+        clearSelectedArtist();
+        paramInput.value          = '';
+        paramInput.readOnly       = false;
+        paramSelect.style.display = 'none';
+        sel.value                 = '';
+        // Trigger change to reset param fields
+        sel.dispatchEvent(new Event('change'));
+        document.getElementById('overlay-count').textContent  = '';
+        document.getElementById('overlay-clear').style.display = 'none';
+        clearOverlay();
+    });
+
+    // 6 ── Load extensions ─────────────────────────────────────────────────────────
+
+    import { registerSectionHook } from './core/infopad.js';
+    import { registerPanel }       from './core/panels.js';
+    import { addLayerGroup,
+        removeLayerGroup }    from './core/map.js';
+
+    const coreAPI = {
+        sparql: {
+            query:        (sparql) => import('./core/sparql.js').then(m => m.query(sparql)),
+            runOverlay:   (sparql, label) => runOverlay(sparql, label),
+            clearOverlay: () => clearOverlay()
+        },
+        infopad: {
+            open:  (qid) => openEntity(qid),
+            close: ()    => closePanel()
+        },
+        panels: {
+            register: (def) => registerPanel(def),
+            show:     (id, qid) => import('./core/panels.js').then(m => m.showPanel(id, qid)),
+            hide:     (id) => import('./core/panels.js').then(m => m.hidePanel(id))
+        },
+        map: {
+            addLayerGroup:    (id, layers) => addLayerGroup(id, layers),
+            removeLayerGroup: (id)         => removeLayerGroup(id)
+        },
+        status: {
+            set: (msg, autohide) => setStatus(msg, autohide)
+        },
+        config
+    };
+
+    for (const extPath of (config.extensions || [])) {
+        try {
+            const mod = await import(extPath + 'index.js');
+            const ext = mod.default;
+            ext.init?.(map, config, coreAPI);
+            if (ext.type === 'infopad-section' && ext.infoPadSection) {
+                registerSectionHook(ext.id, ext.infoPadSection.bind(ext));
+            }
+        } catch (e) {
+            console.warn('[gheppio] Extension failed to load:', extPath, e);
+        }
+    }
+
+    // 7 ── URL parameter: open entity on load ──────────────────────────────────────
+
+    const initialQID = getUrlParam('q');
+    if (initialQID) openEntity(initialQID);
+
+    // 8 ── About panel toggle ──────────────────────────────────────────────────────
+
+    (function () {
+        const toggle = document.getElementById('about-toggle');
+        const panel  = document.getElementById('about-panel');
+        const close  = document.getElementById('about-close');
+        const open   = () => { panel.classList.add('open');    toggle.classList.add('active'); };
+        const shut   = () => { panel.classList.remove('open'); toggle.classList.remove('active'); };
+        const isOpen = () => panel.classList.contains('open');
+        toggle.addEventListener('click', e => { e.preventDefault(); isOpen() ? shut() : open(); });
+        close.addEventListener('click',  shut);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && isOpen()) shut(); });
+        document.addEventListener('click',   e => {
+            if (isOpen() && !panel.contains(e.target) && e.target !== toggle) shut();
+        });
+    }());
+
+</script>
+</body>
+</html>

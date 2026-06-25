@@ -1,0 +1,28 @@
+/* ============================================================================
+   CUSTOM.CSS — Institution-specific overrides for Gheppio
+   Loaded after gheppio.css. Override any token or rule here.
+   ============================================================================ */
+
+/*
+   DESIGN TOKENS — override in :root to retheme the entire application:
+
+   :root {
+       --navy:         #0d2046;   Main colour (header, panel accents, text)
+       --navy-light:   #1e3f7a;   Button borders, links
+       --accent:       #c8102e;   Red bar on panel top + btn-own left border
+       --font-ui:      'Libre Franklin', sans-serif;
+       --font-serif:   'Libre Baskerville', serif;
+   }
+
+   ABOUT PANEL POSITION — adjust margin-left to align with your nav links:
+
+   #about-panel-inner {
+       margin-left: 310px;
+   }
+
+   LOGO FILTER — remove the brightness inversion if your logo is already white:
+
+   .header-logo img {
+       filter: none;
+   }
+*/

@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/kewerner/gheppio/config.schema.json",
+  "title": "Gheppio Instance Configuration",
+  "type": "object",
+  "required": ["institution", "map", "sparql"],
+
+  "properties": {
+
+    "institution": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string" },
+        "shortName":   { "type": "string" },
+        "logo":        { "type": "string", "description": "Path to logo file relative to root" },
+        "url":         { "type": "string", "format": "uri" },
+        "contact":     { "type": "string", "format": "email" },
+        "description": { "type": "string" },
+        "footerNote":  { "type": "string", "description": "Use {year} for current year" }
+      }
+    },
+
+    "map": {
+      "type": "object",
+      "required": ["token", "center", "zoom"],
+      "properties": {
+        "token":        { "type": "string" },
+        "defaultStyle": { "type": "string" },
+        "satellite":    { "type": "boolean", "default": true },
+        "center":       { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "zoom":         { "type": "number", "minimum": 0, "maximum": 22 },
+        "pitch":        { "type": "number", "minimum": 0, "maximum": 85 },
+        "bearing":      { "type": "number" },
+        "maxPitch":     { "type": "number" },
+        "hash":         { "type": "boolean", "default": true }
+      }
+    },
+
+    "wikidata": {
+      "type": "object",
+      "properties": {
+        "minZoom":               { "type": "number" },
+        "debounceMs":            { "type": "number" },
+        "fetchLanguages":        { "type": "array", "items": { "type": "string" } },
+        "labelLanguageFallback": { "type": "array", "items": { "type": "string" } },
+        "countryLanguageMap":    { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "sparql": {
+      "type": "object",
+      "required": ["proxy"],
+      "properties": {
+        "proxy":    { "type": "string", "description": "URL to sparql-proxy.php (relative or absolute)" },
+        "endpoint": { "type": "string", "format": "uri" },
+        "cacheTTL": { "type": "number", "description": "Cache TTL in seconds" }
+      }
+    },
+
+    "infopad": {
+      "type": "object",
+      "properties": {
+        "sections": {
+          "type": "object",
+          "properties": {
+            "texts":   { "$ref": "#/$defs/section" },
+            "images":  { "$ref": "#/$defs/section" },
+            "records": { "$ref": "#/$defs/section" }
+          }
+        },
+        "locatedHerePanel": { "type": "boolean" },
+        "wikipediaSummary": { "type": "boolean" }
+      }
+    },
+
+    "search": {
+      "type": "object",
+      "properties": {
+        "buildingTerms": {
+          "type": "object",
+          "properties": {
+            "language": { "type": "string" },
+            "terms":    { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+
+    "historicMaps": {
+      "type": "array",
+      "description": "Geo-bounded historic map layer switcher groups",
+      "items": { "$ref": "#/$defs/historicMapGroup" }
+    },
+
+    "extensions": {
+      "type": "array",
+      "description": "Paths to extension directories to load",
+      "items": { "type": "string" }
+    },
+
+    "couch": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["endpoint"],
+          "properties": {
+            "endpoint":  { "type": "string", "format": "uri" },
+            "databases": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        }
+      ]
+    },
+
+    "demo": {
+      "type": "boolean",
+      "description": "If true, disables CouchDB calls and loads demo queries"
+    }
+  },
+
+  "$defs": {
+    "externalSource": {
+      "type": "object",
+      "required": ["label", "url"],
+      "properties": {
+        "property": { "type": "string", "pattern": "^P[0-9]+$" },
+        "label":    { "type": "string" },
+        "url":      { "type": "string", "description": "Use {value} for the property value, {qid} for the item QID" },
+        "own":      { "type": "boolean", "description": "If true, renders as an 'own resource' button (highlighted)" },
+        "condition": {
+          "type": "object",
+          "description": "Optional: only show this source if condition matches",
+          "properties": {
+            "property": { "type": "string" },
+            "value":    { "type": "string" }
+          }
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/externalSource" } }
+      }
+    },
+    "historicMapGroup": {
+      "type": "object",
+      "required": ["id", "bounds", "layers"],
+      "properties": {
+        "id":     { "type": "string" },
+        "bounds": {
+          "type": "object",
+          "required": ["north", "south", "east", "west"],
+          "properties": {
+            "north": { "type": "number" }, "south": { "type": "number" },
+            "east":  { "type": "number" }, "west":  { "type": "number" }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "label", "style"],
+            "properties": {
+              "key":   { "type": "string" },
+              "label": { "type": "string" },
+              "style": { "type": "string", "description": "Mapbox style URL or 'modern' for the default style" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

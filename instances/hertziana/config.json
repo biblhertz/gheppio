@@ -1,0 +1,162 @@
+{
+  "_comment": "Bibliotheca Hertziana — gheppio instance configuration",
+
+  "institution": {
+    "name": "Bibliotheca Hertziana",
+    "shortName": "BHR",
+    "logo": "assets/bhmpi.svg",
+    "url": "https://www.biblhertz.it",
+    "contact": "werner@biblhertz.it",
+    "description": "The Hertziana DataHub integrates map, Wikidata, digitized books, and photographic archives for art history research.",
+    "footerNote": "Bibliotheca Hertziana — Max-Planck-Institut für Kunstgeschichte {year}"
+  },
+
+  "map": {
+    "token": "pk.YOUR_MAPBOX_TOKEN_HERE",
+    "defaultStyle": "mapbox://styles/kewerner/cmocv3rtx002g01sd05o3h3kd",
+    "satellite": true,
+    "center": [12.482873, 41.892961],
+    "zoom": 17.97,
+    "pitch": 25.0,
+    "bearing": 148.0,
+    "maxPitch": 44,
+    "hash": true
+  },
+
+  "wikidata": {
+    "minZoom": 16,
+    "debounceMs": 600,
+    "fetchLanguages": ["it", "de", "fr", "nl", "es", "en"],
+    "labelLanguageFallback": ["en"],
+    "countryLanguageMap": {
+      "Q38":  "it",
+      "Q183": "de",
+      "Q40":  "de",
+      "Q39":  "de",
+      "Q142": "fr",
+      "Q29":  "es",
+      "Q55":  "nl",
+      "Q31":  "fr",
+      "Q145": "en",
+      "Q30":  "en"
+    }
+  },
+
+  "sparql": {
+    "proxy": "./sparql-proxy.php",
+    "endpoint": "https://query.wikidata.org/sparql",
+    "cacheTTL": 86400
+  },
+
+  "infopad": {
+    "sections": {
+      "texts": {
+        "enabled": true,
+        "sources": [
+          {
+            "property": "P227",
+            "label": "Kubikat",
+            "url": "https://kubikat.primo.exlibrisgroup.com/discovery/search?query=any,contains,{value}&vid=49MPG_KUBIKAT:VU1&sortby=date_d&lang=en",
+            "own": true
+          }
+        ]
+      },
+      "images": {
+        "enabled": true,
+        "wikimediaCommons": true,
+        "wikidataP18": true,
+        "sources": [
+          {
+            "property": "P12855",
+            "label": "Catalogue",
+            "url": "https://foto.biblhertz.it/document/obj/{value}",
+            "own": true
+          },
+          {
+            "property": "P13996",
+            "label": "Getty Archive",
+            "url": "https://www.getty.edu/research/collections/component/{value}"
+          }
+        ]
+      },
+      "records": {
+        "enabled": true,
+        "sources": [
+          { "property": "P10510", "label": "Arachne",       "url": "https://arachne.dainst.org/entity/{value}" },
+          { "property": "P5383",  "label": "ArchInform",    "url": "https://ita.archinform.net/projekte/{value}.htm" },
+          { "property": "P5611",  "label": "BeWeb",         "url": "https://chieseitaliane.chiesacattolica.it/chieseitaliane/AccessoEsterno.do?mode=guest&type=auto&code={value}" },
+          { "property": "P12835", "label": "Census",        "url": "https://database.census.de/#/detail/{value}" },
+          { "property": "P5782",  "label": "DBUnico",       "url": "https://dati.beniculturali.it/mibact/luoghi/resource/CulturalInstituteOrSite/{value}" },
+          { "property": "P1566",  "label": "GeoNames",      "url": "https://www.geonames.org/{value}" },
+          { "property": "P6287",  "label": "ICCD-CF",       "url": "https://dati.beniculturali.it/iccd/cf/resource/CulturalInstituteOrSite/{value}" },
+          { "property": "P6286",  "label": "ICCD-S",        "url": "https://dati.beniculturali.it/iccd/schede/resource/uod/S0{value}" },
+          { "property": "P1584",  "label": "Pleiades",      "url": "https://pleiades.stoa.org/places/{value}" },
+          { "property": "P8068",  "label": "ToposText",     "url": "https://topostext.org/place/{value}" },
+          { "property": "P1669",  "label": "CONA",          "url": "https://www.getty.edu/cona/CONAFullSubject.aspx?subid={value}" },
+          { "property": "P856",   "label": "Website",       "url": "{value}" },
+          { "property": "P973",   "label": "Article",       "url": "{value}" }
+        ]
+      }
+    },
+    "locatedHerePanel": true,
+    "wikipediaSummary": true
+  },
+
+  "search": {
+    "buildingTerms": {
+      "language": "it",
+      "terms": [
+        "chiesa", "basilica", "cattedrale", "duomo", "cappella", "oratorio",
+        "monastero", "abbazia", "convento", "santuario", "palazzo", "villa",
+        "castello", "fortezza", "torre", "tempio", "anfiteatro", "teatro",
+        "museo", "biblioteca", "fontana", "monumento", "arco", "ponte",
+        "church", "cathedral", "chapel", "monastery", "abbey", "palace",
+        "castle", "temple", "amphitheatre", "museum", "library", "tower"
+      ]
+    }
+  },
+
+  "historicMaps": [
+    {
+      "id": "rome",
+      "bounds": { "north": 41.9071628, "south": 41.8763933, "west": 12.443107, "east": 12.5255283 },
+      "layers": [
+        { "key": "modern",      "label": "OSM Modern",    "style": "modern" },
+        { "key": "lanciani",    "label": "Lanciani 1901", "style": "mapbox://styles/kewerner/cmqkzqa81009001sah6jk8su9" },
+        { "key": "virano",      "label": "Virano 1888",   "style": "mapbox://styles/kewerner/cjwlxzbar03751clistsob2cs" },
+        { "key": "nolli",       "label": "Nolli 1754",    "style": "mapbox://styles/kewerner/cjtporgz8099b1fp7g6y2wdt5" },
+        { "key": "archeositar", "label": "ArcheoSitar",   "style": "mapbox://styles/kewerner/clee2zkjn004s01knhjiqinzn" }
+      ]
+    },
+    {
+      "id": "naples",
+      "bounds": { "north": 40.872909, "south": 40.821362, "west": 14.207339, "east": 14.298576 },
+      "layers": [
+        { "key": "modern", "label": "OSM Modern",  "style": "modern" },
+        { "key": "carafa", "label": "Carafa 1775", "style": "mapbox://styles/kewerner/cmqf9cllp000l01r59uyffy9q" }
+      ]
+    },
+    {
+      "id": "laquila",
+      "bounds": { "north": 42.3570352, "south": 42.341563, "west": 13.3841824, "east": 13.418323 },
+      "layers": [
+        { "key": "modern", "label": "OSM Modern", "style": "modern" },
+        { "key": "vandi",  "label": "Vandi 1753", "style": "mapbox://styles/kewerner/cjx4kfic106zs1co7t4vfhjqs" }
+      ]
+    }
+  ],
+
+  "extensions": [
+    "extensions/iccd/"
+  ],
+
+  "couch": {
+    "endpoint": "https://cdb.biblhertz.it",
+    "databases": {
+      "ocr":  "ocr",
+      "lupa": "lupa"
+    }
+  },
+
+  "demo": false
+}

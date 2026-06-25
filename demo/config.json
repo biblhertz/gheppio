@@ -1,0 +1,112 @@
+{
+  "_comment": "Gheppio demo configuration — Dura Europos (Syria) excavation finds via Wikidata",
+  "institution": {
+    "name": "Gheppio Demo — Dura Europos",
+    "shortName": "DEMO",
+    "logo": "assets/logo.svg",
+    "url": "https://github.com/kewerner/gheppio",
+    "description": "Demo instance showing excavation finds from Dura Europos (Syria), one of the best-documented ancient sites on Wikidata. No institutional backend required.",
+    "footerNote": "Gheppio — Open Heritage Map {year}"
+  },
+  "map": {
+    "token": "pk.YOUR_MAPBOX_TOKEN_HERE",
+    "defaultStyle": "mapbox://styles/mapbox/light-v11",
+    "satellite": true,
+    "center": [
+      40.72773,
+      34.75015
+    ],
+    "zoom": 16,
+    "pitch": 0,
+    "bearing": 0,
+    "maxPitch": 44,
+    "hash": true
+  },
+  "wikidata": {
+    "minZoom": 13,
+    "debounceMs": 600,
+    "fetchLanguages": [
+      "en",
+      "fr",
+      "de",
+      "it"
+    ],
+    "labelLanguageFallback": [
+      "en"
+    ],
+    "countryLanguageMap": {}
+  },
+  "sparql": {
+    "proxy": "./sparql-proxy.php",
+    "endpoint": "https://query.wikidata.org/sparql",
+    "cacheTTL": 86400
+  },
+  "infopad": {
+    "sections": {
+      "texts": {
+        "enabled": true,
+        "sources": []
+      },
+      "images": {
+        "enabled": true,
+        "wikimediaCommons": true,
+        "wikidataP18": true,
+        "sources": []
+      },
+      "records": {
+        "enabled": true,
+        "sources": [
+          {
+            "property": "P1584",
+            "label": "Pleiades",
+            "url": "https://pleiades.stoa.org/places/{value}"
+          },
+          {
+            "property": "P8068",
+            "label": "ToposText",
+            "url": "https://topostext.org/place/{value}"
+          },
+          {
+            "property": "P856",
+            "label": "Website",
+            "url": "{value}"
+          },
+          {
+            "property": "P973",
+            "label": "Article",
+            "url": "{value}"
+          }
+        ]
+      }
+    },
+    "locatedHerePanel": true,
+    "wikipediaSummary": true
+  },
+  "search": {
+    "buildingTerms": {
+      "language": "en",
+      "terms": [
+        "temple",
+        "synagogue",
+        "church",
+        "mithraeum",
+        "building",
+        "house",
+        "tower",
+        "gate",
+        "wall",
+        "bath",
+        "agora",
+        "forum",
+        "excavation",
+        "find",
+        "locus",
+        "insula"
+      ]
+    }
+  },
+  "historicMaps": [],
+  "extensions": [],
+  "couch": null,
+  "demo": true
+}
