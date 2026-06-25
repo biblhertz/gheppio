@@ -4,7 +4,17 @@
 
 Gheppio lets cultural heritage organisations deploy a map-based research interface that connects Wikidata items to their own digitized holdings, photographic archives, and authority files — without writing application code.
 
-Each institution provides a `config.json` and a `queries.js`. Everything else is shared core.
+Each institution provides a `config.json`, a `queries.js` and a `token.js` with its Mapbox token. Everything else is shared core.
+
+The `token.js` file (in root) should look like this:
+
+```json
+{
+"token": "pk.YOUR_MAPBOXTOKEN_HERE"
+}
+```
+
+You can get aan account and your personal token at [MapBox](https://mapbox.com).
 
 ---
 
@@ -23,7 +33,7 @@ Each institution provides a `config.json` and a `queries.js`. Everything else is
 The included demo targets the Dura Europos excavation site (Syria, Q193930) — one of the most thoroughly documented ancient sites on Wikidata. No institutional backend required.
 
 ```bash
-git clone https://github.com/kewerner/gheppio
+git clone https://github.com/biblhertz/gheppio
 cd gheppio
 cp demo/config.json config.json
 cp demo/queries.js queries.js
