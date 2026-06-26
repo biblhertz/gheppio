@@ -395,6 +395,22 @@ button.location-btn {
 
 button.location-btn { margin-top: 1rem; }
 
+/* Parts & Contents / Depicted by — stacked vertically */
+#myData .panel-body > button.location-btn {
+    display: block !important;
+    width: fit-content;
+    margin-bottom: 0.35rem;
+}
+
+/* Part-of breadcrumb buttons in h1 — stacked vertically */
+#myData h1 > a.location-btn {
+    display: block !important;
+    width: fit-content;
+    margin-bottom: 0.35rem;
+}
+
+
+
 a.location-btn:hover,
 button.location-btn:hover {
     background-color: var(--navy);
@@ -995,6 +1011,7 @@ span.notabene {
     padding: 0.3rem 0.75rem;
     letter-spacing: 0.05em;
 }
+
 
 /* ============================================================================
    PANEL BACKDROP (mobile)

@@ -14,10 +14,10 @@
 // ============================================================================
 
 import {
-    log, logError,
+    logError,
     getLangForCountry, buildLangOrder, getBestLabel, getPreferredWikiLang,
     capitalize, expandUrl,
-    setStatus, createSection, createResourceButton
+    createSection, createResourceButton
 } from './utils.js';
 
 import {
@@ -31,26 +31,21 @@ import {
 let _config = null;
 let _map    = null;
 
-// Registered extension infopad-section hooks: [{ id, infoPadSection }]
+// Extension infopad-section hooks: [{ id, fn }]
 const _sectionHooks = [];
+
+// Lightbox element (created lazily)
+let _lbEl = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 export function initInfopad(config, map) {
     _config = config;
     _map    = map;
-
     window.addEventListener('gheppio:entity-selected', e => openEntity(e.detail.qid));
     window.addEventListener('gheppio:map-click-empty', ()  => closePanel());
 }
 
-/**
- * Register an extension infopad-section hook.
- * Called by the extension loader after init().
- *
- * @param {string}   id
- * @param {function} fn  — (entity, qid, config, context) → HTMLElement|null
- */
 export function registerSectionHook(id, fn) {
     _sectionHooks.push({ id, fn });
 }
@@ -59,104 +54,97 @@ export function registerSectionHook(id, fn) {
 
 export async function openEntity(qid) {
     if (!qid) return;
-    const panel = _getPanel();
 
-    _hideLocatedHere();
+    const panel = _getPanel();
+    _hideSidePanels();
     _showPanel(panel);
     panel.innerHTML = _loadingHTML();
-
-    // Update URL
-    const url = new URL(window.location);
-    url.searchParams.set('q', qid);
-    window.history.pushState({}, '', url);
+    _setUrlParam('q', qid);
 
     try {
-        const entity   = await fetchEntity(qid);
+        const entity = await fetchEntity(qid);
         if (!entity) throw new Error('Entity not found: ' + qid);
 
-        const langOrder  = _config.wikidata?.fetchLanguages ?? ['en'];
+        // ── Language setup ────────────────────────────────────────────────────
+        const langOrder  = _config.wikidata?.fetchLanguages     ?? ['en'];
         const countryMap = _config.wikidata?.countryLanguageMap ?? {};
-        const countryQid = entity.claims?.P17?.[0]?.mainsnak?.datavalue?.value?.id;
+        const countryQid = _claimQid(entity, 'P17');
         const wikiLang   = getPreferredWikiLang(entity, countryMap, langOrder)
             ?? getLangForCountry(countryQid, countryMap);
+        const langFull   = buildLangOrder(wikiLang, langOrder);
+        const wikiTitle  = entity.sitelinks?.[`${wikiLang}wiki`]?.title ?? null;
 
-        // QIDs for related entities we need labels for
-        const p131Qid  = _claim(entity, 'P131');  // admin territory
-        const p276Qid  = _claim(entity, 'P276');  // location (building)
-        const p31Qid   = _claim(entity, 'P31');   // instance of
-        const p195Qid  = _claim(entity, 'P195');  // collection
-        const p361Qid  = _claim(entity, 'P361');  // part of (first, for backward compat)
-        // All P361 values (part of) — can be multiple
-        const p361Qids = (entity.claims?.P361 || [])
-            .map(c => c.mainsnak?.datavalue?.value?.id).filter(Boolean);
-        const hasP527  = !!(entity.claims?.P527?.length); // has parts
-        // All P189 values (location of discovery) — can be multiple
-        const p189Qids = (entity.claims?.P189 || [])
-            .map(c => c.mainsnak?.datavalue?.value?.id).filter(Boolean);
-        const p189Qid  = p189Qids[0] ?? null;  // first, for compat
-        const invNum   = entity.claims?.P217?.[0]?.mainsnak?.datavalue?.value || '';
+        // ── Claim extraction ──────────────────────────────────────────────────
+        const p131Qid  = _claimQid(entity, 'P131');  // admin territory
+        const p276Qid  = _claimQid(entity, 'P276');  // location
+        const p31Qid   = _claimQid(entity, 'P31');   // instance of
+        const p195Qid  = _claimQid(entity, 'P195');  // collection
         const hasP625  = !!entity.claims?.P625;
+        const hasP527  = !!(entity.claims?.P527?.length);
+        const invNum   = entity.claims?.P217?.[0]?.mainsnak?.datavalue?.value ?? '';
 
-        const wikiTitle = entity.sitelinks?.[`${wikiLang}wiki`]?.title ?? null;
+        // All P361 (part of) and P189 (location of discovery) values
+        const p361Qids = _claimQids(entity, 'P361');
+        const p189Qids = _claimQids(entity, 'P189');
 
-        // Fetch labels + Wikipedia extract in parallel
-        const langFull = buildLangOrder(wikiLang, langOrder);
-        const [adminLabel, locationLabel, instanceLabel, collectionLabel, partOfLabel,
-            discoveryLabel, ...rest] =
-            await Promise.all([
-                fetchLabel(p131Qid, langFull),
-                (!hasP625 && p276Qid) ? fetchLabel(p276Qid, langFull) : Promise.resolve(''),
-                p31Qid  ? fetchLabel(p31Qid, ['en'])    : Promise.resolve(''),
-                p195Qid ? fetchLabel(p195Qid, langFull) : Promise.resolve(''),
-                p361Qid ? fetchLabel(p361Qid, langFull) : Promise.resolve(''),
-                p189Qid ? fetchLabel(p189Qid, langFull) : Promise.resolve(''),
-                // All additional P189 values (skip index 0)
-                ...p189Qids.slice(1).map(id => fetchLabel(id, langFull)),
-                // All additional P361 values (skip index 0, already fetched as p361Qid)
-                ...p361Qids.slice(1).map(id => fetchLabel(id, langFull)),
-            ]);
-        // Split rest into p189Labels and p361Labels
-        const p189ExtraCount = Math.max(0, p189Qids.length - 1);
-        const p189Labels = rest.slice(0, p189ExtraCount);
-        const p361Labels = rest.slice(p189ExtraCount);
+        // ── Parallel label + Wikipedia fetch ──────────────────────────────────
+        const [
+            adminLabel, locationLabel, instanceLabel, collectionLabel,
+            p361Label0, p189Label0,
+            ...extraLabels
+        ] = await Promise.all([
+            fetchLabel(p131Qid, langFull),
+            (!hasP625 && p276Qid) ? fetchLabel(p276Qid, langFull) : Promise.resolve(''),
+            p31Qid  ? fetchLabel(p31Qid,  ['en'])   : Promise.resolve(''),
+            p195Qid ? fetchLabel(p195Qid, langFull) : Promise.resolve(''),
+            p361Qids[0] ? fetchLabel(p361Qids[0], langFull) : Promise.resolve(''),
+            p189Qids[0] ? fetchLabel(p189Qids[0], langFull) : Promise.resolve(''),
+            // Remaining P361 values
+            ...p361Qids.slice(1).map(id => fetchLabel(id, langFull)),
+            // Remaining P189 values
+            ...p189Qids.slice(1).map(id => fetchLabel(id, langFull)),
+        ]);
 
-        // Build full discovery list: [{qid, label}]
-        const discoveryList = p189Qids.map((id, i) => ({
-            qid:   id,
-            label: i === 0 ? discoveryLabel : (p189Labels[i - 1] || id)
-        })).filter(d => d.label);
+        // Split extraLabels into P361 and P189 extras
+        const p361Extra = extraLabels.slice(0, p361Qids.length - 1);
+        const p189Extra = extraLabels.slice(p361Qids.length - 1);
 
-        // Build full part-of list: [{qid, label}]
-        const partOfList = p361Qids.map((id, i) => ({
-            qid:   id,
-            label: i === 0 ? partOfLabel : (p361Labels[i - 1] || id)
-        })).filter(p => p.label);
+        const partOfList = p361Qids
+            .map((id, i) => ({ qid: id, label: i === 0 ? p361Label0 : (p361Extra[i - 1] || '') }))
+            .filter(p => p.label);
 
-        let wikiExtract = null;
-        if (wikiTitle && _config.infopad?.wikipediaSummary !== false) {
-            wikiExtract = await fetchWikipediaExtract(wikiTitle, wikiLang);
-        }
+        const discoveryList = p189Qids
+            .map((id, i) => ({ qid: id, label: i === 0 ? p189Label0 : (p189Extra[i - 1] || '') }))
+            .filter(d => d.label);
 
-        // Depicted-by (reverse P180) — fire and don't block panel render
+        // Wikipedia extract (blocking — needed before render)
+        const wikiExtract = (wikiTitle && _config.infopad?.wikipediaSummary !== false)
+            ? await fetchWikipediaExtract(wikiTitle, wikiLang)
+            : null;
+
+        // Depicted-by — non-blocking, resolves after panel renders
         const depictedByPromise = fetchDepictedBy(qid, _config.sparql.proxy);
 
-        // Centre map
+        // ── Render ────────────────────────────────────────────────────────────
         _centerMap(entity);
-
-        // Build panel
         panel.innerHTML = '';
-        const context = { adminLabel, locationLabel, instanceLabel,
-            collectionLabel, partOfLabel, partOfList, invNum,
-            p131Qid, p276Qid, p31Qid, p195Qid, p361Qid,
-            p189Qid, discoveryLabel, discoveryList,
-            hasP625, hasP527, wikiLang, wikiTitle };
 
-        _buildPanel(panel, entity, qid, wikiExtract, context, depictedByPromise);
+        const ctx = {
+            adminLabel, locationLabel, instanceLabel, collectionLabel,
+            partOfList, discoveryList, invNum,
+            p131Qid, p276Qid, p31Qid, p195Qid,
+            hasP625, hasP527, wikiLang, wikiTitle
+        };
 
-        // Run extension hooks
+        _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise);
+
+        // Extension hooks
         for (const hook of _sectionHooks) {
             try {
-                const el = hook.fn(entity, qid, _config, { adminLabel, labelValue: getBestLabel(entity, countryMap, langOrder) });
+                const el = hook.fn(entity, qid, _config, {
+                    adminLabel,
+                    labelValue: getBestLabel(entity, countryMap, langOrder)
+                });
                 if (el instanceof HTMLElement) panel.querySelector('.panel-body')?.appendChild(el);
             } catch (e) {
                 logError('Extension hook error:', hook.id, e);
@@ -173,7 +161,7 @@ export async function openEntity(qid) {
 
 export function closePanel() {
     const panel = _getPanel();
-    _hideLocatedHere();
+    _hideSidePanels();
     panel.classList.remove('panel-entering');
     panel.classList.add('panel-leaving');
     setTimeout(() => {
@@ -182,52 +170,37 @@ export function closePanel() {
         panel.classList.remove('panel-leaving');
     }, 250);
     document.body.classList.remove('panel-open');
-
-    const url = new URL(window.location);
-    url.searchParams.delete('q');
-    window.history.pushState({}, '', url);
-
+    _deleteUrlParam('q');
     window.dispatchEvent(new CustomEvent('gheppio:infopad-closed'));
 }
 
-// ── Panel shell ───────────────────────────────────────────────────────────────
+// ── Panel builder ─────────────────────────────────────────────────────────────
 
-function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise = null) {
-    const { countryMap, langOrder } = _langConfig();
-
-    // Thumbnail
+function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
     _addThumbnail(entity, panel);
-
-    // Header
     _addHeader(entity, qid, panel, ctx);
 
-    // Body
     const body = document.createElement('div');
     body.className = 'panel-body';
     panel.appendChild(body);
 
-    // Wikipedia extract
     if (wikiExtract && ctx.wikiTitle) {
         _addWikipediaSection(wikiExtract, ctx.wikiTitle, ctx.wikiLang, body);
     }
 
-    // "Parts & contents" button — always shown, runs all location queries + P527
-    const locationQID = qid;  // always query the item itself
-    const btn = document.createElement('button');
-    btn.className   = 'location-btn';
-    btn.textContent = 'Parts & contents    ▷';
-    btn.addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('gheppio:located-here', {
-            detail: { locationQID, qid }
-        }));
+    // Parts & contents button — always present
+    _addSidePanelBtn(body, 'Parts & contents', 'gheppio:located-here', { locationQID: qid, qid });
+
+    // Depicted by button — inserted once depictedBy resolves with results
+    depictedByPromise.then(rows => {
+        if (!rows.length) return;
+        _addSidePanelBtn(body, 'Depicted by', 'gheppio:depicted-by', { qid, rows });
     });
-    body.appendChild(btn);
 
     body.appendChild(_divider());
 
-    // Config-driven sections
     _addTextsSection(entity, qid, ctx.wikiLang, body);
-    _addImagesSection(entity, body, depictedByPromise);
+    _addImagesSection(entity, body);
     _addRecordsSection(entity, qid, body);
 
     // Footer
@@ -238,67 +211,89 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise = n
     panel.appendChild(note);
 }
 
+// ── Side panel button ─────────────────────────────────────────────────────────
+
+function _addSidePanelBtn(container, label, eventName, detail) {
+    const btn = document.createElement('button');
+    btn.className   = 'location-btn';
+    btn.textContent = `${label}  \u00a0 \u25B7`;
+    btn.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent(eventName, { detail }));
+    });
+    // Insert before the divider so both buttons stay grouped above the sections
+    const divider = container.querySelector('hr.panel-divider');
+    divider ? container.insertBefore(btn, divider) : container.appendChild(btn);
+}
+
 // ── Thumbnail ─────────────────────────────────────────────────────────────────
 
 function _addThumbnail(entity, container) {
-    const claim = entity.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
-    if (!claim) return;
-    const thumb = document.createElement('div');
-    thumb.id = 'gh-thumb';
-    thumb.innerHTML = `<img alt="[reference image]"
-        src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(claim)}?width=160"/>`;
-    container.appendChild(thumb);
+    const val = entity.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+    if (!val) return;
+    const div = document.createElement('div');
+    div.id = 'gh-thumb';
+    div.innerHTML = `<img alt="[reference image]"
+        src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(val)}?width=160"/>`;
+    container.appendChild(div);
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
 function _addHeader(entity, qid, container, ctx) {
-    const { countryMap, langOrder } = _langConfig();
-    const label = getBestLabel(entity, countryMap, langOrder);
-    const cap   = s => s ? capitalize(s) : '';
+    const countryMap = _config.wikidata?.countryLanguageMap ?? {};
+    const langOrder  = _config.wikidata?.fetchLanguages     ?? ['en'];
+    const label      = getBestLabel(entity, countryMap, langOrder);
+    const cap        = s => s ? capitalize(s) : '';
 
     const qidLine = `<br/><small><a class="qid-link"
         href="https://www.wikidata.org/wiki/${qid}" target="_blank">${qid}</a></small>`;
 
-    // isArtwork: has a collection (P195) OR is located-in a building without its own coordinates.
-    // Buildings/places with P361 (part of) but their own P625 are NOT artworks.
+    // Artwork: has a collection (P195) or located-in a building without own coordinates
     const isArtwork = !!(ctx.collectionLabel || ctx.locationLabel);
+
     const h1 = document.createElement('h1');
 
     if (isArtwork) {
+        const locLabel = ctx.collectionLabel || ctx.locationLabel;
+        const locQid   = ctx.p195Qid         || ctx.p276Qid;
+        const locBtn   = locLabel
+            ? `<a class="location-link location-btn" href="?q=${locQid}" data-qid="${locQid}">${locLabel}</a><br/>`
+            : '';
+
         const typeParts = [cap(ctx.instanceLabel), ctx.invNum ? `Inv.\u00a0${ctx.invNum}` : ''].filter(Boolean);
         const typeLine  = typeParts.length ? `<br/><small>${typeParts.join(', ')}</small>` : '';
-        const bldLabel  = ctx.collectionLabel || ctx.locationLabel || ctx.partOfLabel;
-        const bldQid    = ctx.p195Qid         || ctx.p276Qid       || ctx.p361Qid;
-        const bldBtn    = bldLabel
-            ? `<a class="location-link location-btn" href="?q=${bldQid}" data-qid="${bldQid}">${bldLabel}</a><br/>`
-            : '';
-        const discoveryBtns = (ctx.discoveryList?.length)
+
+        const discoveryBtns = ctx.discoveryList?.length
             ? '<br/><small class="discovery-prefix">From:</small><br/>' +
-            ctx.discoveryList.map(d =>
-                `<a class="location-link location-btn" href="?q=${d.qid}" data-qid="${d.qid}">${d.label}</a>`
-            ).join('<br/>')
+            ctx.discoveryList
+                .map(d => `<a class="location-link location-btn" href="?q=${d.qid}" data-qid="${d.qid}">${d.label}</a>`)
+                .join('<br/>')
             : '';
-        h1.innerHTML = `${bldBtn}${label}${typeLine}${discoveryBtns}${qidLine}`;
+
+        h1.innerHTML = `${locBtn}${label}${typeLine}${discoveryBtns}${qidLine}`;
+
     } else {
-        const locStr  = ctx.adminLabel;
+        const partOfBtns = ctx.partOfList?.length
+            ? ctx.partOfList
+            .map(p => `<a class="location-link location-btn" href="?q=${p.qid}" data-qid="${p.qid}">${p.label}</a>`)
+            .join(' ') + '<br/>'
+            : '';
+
+        const locStr   = ctx.adminLabel;
         const typeLine = ctx.instanceLabel
             ? (locStr
                 ? `<br/><small>${cap(ctx.instanceLabel)} in ${locStr}</small>`
                 : `<br/><small>${cap(ctx.instanceLabel)}</small>`)
             : (locStr ? `<br/><small>${locStr}</small>` : '');
+
         const invPart = ctx.invNum
             ? `<br/><small class="inventory-num">Inv.\u00a0${ctx.invNum}</small>`
             : '';
-        // All P361 "part of" values as navigation buttons — above the title
-        const partOfBtns = (ctx.partOfList || [])
-            .map(p => `<a class="location-link location-btn" href="?q=${p.qid}" data-qid="${p.qid}">${p.label}</a>`)
-            .join(' ');
-        const partOfLine = partOfBtns ? `${partOfBtns}<br/>` : '';
-        h1.innerHTML = `${partOfLine}${label}${typeLine}${invPart}${qidLine}`;
+
+        h1.innerHTML = `${partOfBtns}${label}${typeLine}${invPart}${qidLine}`;
     }
 
-    // SPA navigation for building links
+    // SPA navigation for all .location-link anchors
     h1.querySelectorAll('.location-link').forEach(a => {
         a.addEventListener('click', e => {
             e.preventDefault();
@@ -312,12 +307,12 @@ function _addHeader(entity, qid, container, ctx) {
 // ── Wikipedia section ─────────────────────────────────────────────────────────
 
 function _addWikipediaSection(extract, wikiTitle, lang, container) {
-    const div   = document.createElement('div');
+    const div = document.createElement('div');
     div.className = 'wikipedia-extract';
 
     const short = extract.length > 300 ? extract.substring(0, 300) + '\u2026' : extract;
 
-    const btn  = document.createElement('button');
+    const btn = document.createElement('button');
     btn.className = 'wiki-more-button';
     btn.innerHTML = '<span>&#x25BD;&nbsp;&nbsp;Summary</span>';
     div.appendChild(btn);
@@ -338,8 +333,8 @@ function _addWikipediaSection(extract, wikiTitle, lang, container) {
 
             const full = await fetchWikipediaFull(wikiTitle, lang);
             if (full?.extract) {
-                btn.innerHTML = '<span>&#x25B3;&nbsp;&nbsp;Summary</span>';
-                btn.disabled  = false;
+                btn.innerHTML  = '<span>&#x25B3;&nbsp;&nbsp;Summary</span>';
+                btn.disabled   = false;
                 para.innerHTML = '';
                 const wrap = document.createElement('div');
                 wrap.id = 'gh-wikipedia';
@@ -353,16 +348,16 @@ function _addWikipediaSection(extract, wikiTitle, lang, container) {
                 btn.disabled  = false;
             }
         } else {
-            btn.innerHTML = '<span>&#x25BD;&nbsp;&nbsp;Summary</span>';
+            btn.innerHTML  = '<span>&#x25BD;&nbsp;&nbsp;Summary</span>';
             para.innerHTML = short;
-            fullLoaded = false;
+            fullLoaded     = false;
         }
     });
 
     container.appendChild(div);
 }
 
-// ── Config-driven sections ────────────────────────────────────────────────────
+// ── Texts section ─────────────────────────────────────────────────────────────
 
 function _addTextsSection(entity, qid, wikiLang, container) {
     if (_config.infopad?.sections?.texts?.enabled === false) return;
@@ -372,33 +367,30 @@ function _addTextsSection(entity, qid, wikiLang, container) {
 
     for (const src of sources) {
         const val = _propValue(entity, src.property);
-        if (!val) continue;
-        if (!_conditionMet(entity, src.condition)) continue;
+        if (!val || !_conditionMet(entity, src.condition)) continue;
         createResourceButton(section, src.label, expandUrl(src.url, val, qid), src.own ?? false);
     }
 
-    // Wikipedia link (always shown when sitelink exists, not config-listed)
     if (_config.infopad?.wikipediaSummary !== false) {
         const title = entity.sitelinks?.[`${wikiLang}wiki`]?.title;
-        if (title) {
-            createResourceButton(
-                section, 'Wikipedia',
-                `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(title)}?useskin=Vector`
-            );
-        }
+        if (title) createResourceButton(
+            section, 'Wikipedia',
+            `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(title)}?useskin=Vector`
+        );
     }
 
     if (section.querySelector('button')) container.appendChild(section);
 }
 
-function _addImagesSection(entity, container, depictedByPromise = null) {
+// ── Images section ────────────────────────────────────────────────────────────
+
+function _addImagesSection(entity, container) {
     if (_config.infopad?.sections?.images?.enabled === false) return;
 
-    const section  = createSection('Images');
-    const imgConf  = _config.infopad?.sections?.images ?? {};
-    const sources  = imgConf.sources ?? [];
+    const section = createSection('Images');
+    const imgConf = _config.infopad?.sections?.images ?? {};
+    const sources = imgConf.sources ?? [];
 
-    // Wikimedia Commons category (P373)
     if (imgConf.wikimediaCommons !== false) {
         const cat = _propValue(entity, 'P373');
         if (cat) createResourceButton(
@@ -407,81 +399,35 @@ function _addImagesSection(entity, container, depictedByPromise = null) {
         );
     }
 
-    // Config-declared image sources
     for (const src of sources) {
         const val = _propValue(entity, src.property);
-        if (!val) continue;
-        if (!_conditionMet(entity, src.condition)) continue;
+        if (!val || !_conditionMet(entity, src.condition)) continue;
         createResourceButton(section, src.label, expandUrl(src.url, val), src.own ?? false);
     }
 
-    container.appendChild(section);
-
-    // Depicted by (async — appended when ready)
-    if (depictedByPromise) {
-        depictedByPromise.then(rows => {
-            if (!rows.length) return;
-            const sub = createSection('Depicted by');
-
-            // 2-column grid
-            const grid = document.createElement('div');
-            grid.className = 'db-grid';
-            sub.appendChild(grid);
-
-            rows.forEach(row => {
-                const qid   = (row.item?.value || '').replace('http://www.wikidata.org/entity/', '');
-                const label = row.itemLabel?.value || qid;
-                const imgUrl = row.image?.value
-                    ? row.image.value.replace('http://', 'https://')
-                    : null;
-                const thumb = imgUrl ? imgUrl + '?width=60' : null;
-                const large = imgUrl ? imgUrl + '?width=600' : null;
-
-                const cell = document.createElement('div');
-                cell.className = 'db-row';
-
-                // Left: thumbnail with lightbox trigger
-                const thumbDiv = document.createElement('div');
-                thumbDiv.className = 'db-thumb';
-                if (thumb) {
-                    const img = document.createElement('img');
-                    img.src     = thumb;
-                    img.loading = 'lazy';
-                    img.alt     = '';
-                    img.addEventListener('click', () => _showLightbox(large, label));
-                    img.addEventListener('error', function() { this.style.visibility = 'hidden'; });
-                    thumbDiv.appendChild(img);
-                }
-                cell.appendChild(thumbDiv);
-
-                // Right: label as link to entity
-                const labelDiv = document.createElement('div');
-                labelDiv.className = 'db-label';
-                const a = document.createElement('a');
-                a.href       = `?q=${qid}`;
-                a.dataset.qid = qid;
-                a.textContent = label;
-                a.addEventListener('click', e => {
-                    e.preventDefault();
-                    import('./infopad.js').then(m => m.openEntity(qid));
-                });
-                labelDiv.appendChild(a);
-                cell.appendChild(labelDiv);
-
-                grid.appendChild(cell);
-            });
-
-            container.appendChild(sub);
-        });
-    }
+    if (section.querySelector('button')) container.appendChild(section);
 }
 
+// ── Records section ───────────────────────────────────────────────────────────
+
+function _addRecordsSection(entity, qid, container) {
+    if (_config.infopad?.sections?.records?.enabled === false) return;
+
+    const section = createSection('Records');
+    const sources = _config.infopad?.sections?.records?.sources ?? [];
+
+    for (const src of sources) {
+        const val = _propValue(entity, src.property);
+        if (!val || !_conditionMet(entity, src.condition)) continue;
+        createResourceButton(section, src.label, expandUrl(src.url, val, qid), src.own ?? false);
+    }
+
+    if (section.querySelector('button')) container.appendChild(section);
+}
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
 
-let _lbEl = null;
-
-function _showLightbox(src, caption) {
+export function showLightbox(src, caption) {
     if (!_lbEl) {
         _lbEl = document.createElement('div');
         _lbEl.id = 'gh-lightbox';
@@ -494,10 +440,10 @@ function _showLightbox(src, caption) {
             </div>`;
         document.body.appendChild(_lbEl);
         _lbEl.querySelector('#gh-lb-backdrop').addEventListener('click', _closeLightbox);
-        _lbEl.querySelector('#gh-lb-close').addEventListener('click', _closeLightbox);
+        _lbEl.querySelector('#gh-lb-close').addEventListener('click',   _closeLightbox);
         document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeLightbox(); });
     }
-    _lbEl.querySelector('#gh-lb-img').src         = src;
+    _lbEl.querySelector('#gh-lb-img').src             = src;
     _lbEl.querySelector('#gh-lb-caption').textContent = caption;
     _lbEl.style.display = 'flex';
 }
@@ -509,37 +455,13 @@ function _closeLightbox() {
     }
 }
 
-function _esc(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function _addRecordsSection(entity, qid, container) {
-    if (_config.infopad?.sections?.records?.enabled === false) return;
-
-    const section = createSection('Records');
-    const sources = _config.infopad?.sections?.records?.sources ?? [];
-
-    for (const src of sources) {
-        const val = _propValue(entity, src.property);
-        if (!val) continue;
-        if (!_conditionMet(entity, src.condition)) continue;
-        createResourceButton(section, src.label, expandUrl(src.url, val, qid), src.own ?? false);
-    }
-
-    if (section.querySelector('button')) container.appendChild(section);
-}
-
 // ── Map centering ─────────────────────────────────────────────────────────────
 
 function _centerMap(entity) {
     const lat = entity.claims?.P625?.[0]?.mainsnak?.datavalue?.value?.latitude;
     const lon = entity.claims?.P625?.[0]?.mainsnak?.datavalue?.value?.longitude;
     if (lat && lon) {
-        _map.flyTo({
-            center: [lon, lat],
-            zoom:   Math.max(_map.getZoom(), 16),
-            speed:  1.4, curve: 1.5
-        });
+        _map.flyTo({ center: [lon, lat], zoom: Math.max(_map.getZoom(), 16), speed: 1.4, curve: 1.5 });
     }
 }
 
@@ -549,19 +471,18 @@ function _showPanel(panel) {
     panel.style.visibility = 'visible';
     panel.style.display    = 'block';
     panel.classList.remove('panel-leaving', 'panel-entering');
-    void panel.offsetWidth; // force reflow to restart animation
+    void panel.offsetWidth; // force reflow
     panel.classList.add('panel-entering');
     document.body.classList.add('panel-open');
     _setupSwipeToClose(panel);
 }
 
 function _setupSwipeToClose(panel) {
-    if (!('ontouchstart' in window)) return;
-    if (panel._swipeAttached) return;
+    if (!('ontouchstart' in window) || panel._swipeAttached) return;
     panel._swipeAttached = true;
     let startY = 0, startScroll = 0;
     panel.addEventListener('touchstart', e => {
-        startY = e.touches[0].clientY;
+        startY      = e.touches[0].clientY;
         startScroll = panel.scrollTop;
     }, { passive: true });
     panel.addEventListener('touchend', e => {
@@ -569,16 +490,14 @@ function _setupSwipeToClose(panel) {
     }, { passive: true });
 }
 
-function _hideLocatedHere() {
+function _hideSidePanels() {
     const p = document.getElementById('located-here-panel');
     if (p) { p.style.display = 'none'; p.style.visibility = 'hidden'; }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function _getPanel() {
-    return document.getElementById('myData');
-}
+function _getPanel() { return document.getElementById('myData'); }
 
 function _loadingHTML() {
     return `<div style="padding:1.25rem 2.5rem">
@@ -593,37 +512,37 @@ function _divider() {
     return hr;
 }
 
-function _langConfig() {
-    return {
-        countryMap: _config.wikidata?.countryLanguageMap ?? {},
-        langOrder:  _config.wikidata?.fetchLanguages     ?? ['en']
-    };
+function _setUrlParam(name, value) {
+    const url = new URL(window.location);
+    url.searchParams.set(name, value);
+    window.history.pushState({}, '', url);
 }
 
-/**
- * Get the string value of the first statement for a property.
- * Handles string, monolingualtext, and entity-id data types.
- */
+function _deleteUrlParam(name) {
+    const url = new URL(window.location);
+    url.searchParams.delete(name);
+    window.history.pushState({}, '', url);
+}
+
+function _claimQid(entity, pid) {
+    return entity.claims?.[pid]?.[0]?.mainsnak?.datavalue?.value?.id ?? null;
+}
+
+function _claimQids(entity, pid) {
+    return (entity.claims?.[pid] || [])
+        .map(c => c.mainsnak?.datavalue?.value?.id)
+        .filter(Boolean);
+}
+
 function _propValue(entity, pid) {
     const stmt = entity.claims?.[pid]?.[0]?.mainsnak?.datavalue;
     if (!stmt) return null;
     if (typeof stmt.value === 'string') return stmt.value;
-    if (stmt.value?.text)              return stmt.value.text;   // monolingualtext
-    if (stmt.value?.id)                return stmt.value.id;     // entity-id (QID)
+    if (stmt.value?.text) return stmt.value.text;
+    if (stmt.value?.id)   return stmt.value.id;
     return String(stmt.value);
 }
 
-/**
- * Get the QID value of the first statement for a property.
- */
-function _claim(entity, pid) {
-    return entity.claims?.[pid]?.[0]?.mainsnak?.datavalue?.value?.id ?? null;
-}
-
-/**
- * Evaluate an optional source condition.
- * { property: 'P17', value: 'Q38' } → only show for Italian items.
- */
 function _conditionMet(entity, condition) {
     if (!condition) return true;
     return _propValue(entity, condition.property) === condition.value;

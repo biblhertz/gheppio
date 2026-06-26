@@ -18,7 +18,7 @@
 
 import { log, logError } from './utils.js';
 import { query }         from './sparql.js';
-import { openEntity }    from './infopad.js';
+import { openEntity, showLightbox } from './infopad.js';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -39,6 +39,11 @@ export function initPanels(config) {
 
     window.addEventListener('gheppio:infopad-closed', () => {
         _hideLocatedHerePanel();
+    });
+
+    // Depicted by panel
+    window.addEventListener('gheppio:depicted-by', e => {
+        _runDepictedBy(e.detail.qid, e.detail.rows);
     });
 
     // Mobile: tap backdrop to close infopad
@@ -231,6 +236,57 @@ async function _desktopLocatedHere(locationQID, qid) {
         logError('Located here error:', e);
         panel.innerHTML = '<p class="lh-error">Query failed.</p>';
     }
+}
+
+
+// ── Depicted By ───────────────────────────────────────────────────────────────
+
+function _runDepictedBy(qid, rows) {
+    let panel = document.getElementById('located-here-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'located-here-panel';
+        document.body.appendChild(panel);
+    }
+    panel.innerHTML = '';
+    panel.style.display    = 'block';
+    panel.style.visibility = 'visible';
+
+    rows.forEach(row => {
+        const itemQid  = (row.item?.value || '').replace('http://www.wikidata.org/entity/', '');
+        const label    = row.itemLabel?.value || itemQid;
+        const imgUrl   = row.image?.value ? row.image.value.replace('http://', 'https://') : null;
+        const thumb    = imgUrl ? imgUrl + '?width=60'  : null;
+        const large    = imgUrl ? imgUrl + '?width=600' : null;
+
+        const cell = document.createElement('div');
+        cell.className = 'db-row';
+
+        const thumbDiv = document.createElement('div');
+        thumbDiv.className = 'db-thumb';
+        if (thumb) {
+            const img = document.createElement('img');
+            img.src     = thumb;
+            img.loading = 'lazy';
+            img.alt     = '';
+            img.addEventListener('click', () => showLightbox(large, label));
+            img.addEventListener('error', function() { this.style.visibility = 'hidden'; });
+            thumbDiv.appendChild(img);
+        }
+        cell.appendChild(thumbDiv);
+
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'db-label';
+        const a = document.createElement('a');
+        a.href          = `?q=${itemQid}`;
+        a.dataset.qid   = itemQid;
+        a.textContent   = label;
+        a.addEventListener('click', e => { e.preventDefault(); openEntity(itemQid); });
+        labelDiv.appendChild(a);
+        cell.appendChild(labelDiv);
+
+        panel.appendChild(cell);
+    });
 }
 
 function _hideLocatedHerePanel() {
