@@ -1,16 +1,5 @@
 // ============================================================================
 // CORE/INFOPAD.JS — Gheppio entity information panel
-//
-// Depends on: core/utils.js, core/sparql.js
-//
-// Listens for:  'gheppio:entity-selected' → opens panel for QID
-//               'gheppio:map-click-empty' → closes panel
-//
-// Fires:        'gheppio:infopad-opened'  → { qid, entity }
-//               'gheppio:infopad-closed'
-//
-// Call initInfopad(config, map) once after DOM is ready.
-// Public API: openEntity(qid), closePanel()
 // ============================================================================
 
 import {
@@ -26,11 +15,8 @@ import {
     fetchDepictedBy
 } from './sparql.js';
 
-// ── Module state ──────────────────────────────────────────────────────────────
-
 let _config = null;
 let _map    = null;
-
 const _sectionHooks = [];
 let _lbEl = null;
 
@@ -170,12 +156,8 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
     body.className = 'panel-body';
     panel.appendChild(body);
 
-    if (wikiExtract && ctx.wikiTitle) {
-        _addWikipediaSection(wikiExtract, ctx.wikiTitle, ctx.wikiLang, body);
-    }
-
+    // 1. Action buttons (just below title/QID)
     _addSidePanelBtn(body, 'Check for Parts & contents', 'gheppio:located-here', { locationQID: qid, qid });
-
     depictedByPromise.then(rows => {
         if (!rows.length) return;
         _addSidePanelBtn(body, 'Depicted by', 'gheppio:depicted-by', { qid, rows });
@@ -183,6 +165,18 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
 
     body.appendChild(_divider());
 
+    // 2. Wikipedia summary
+    if (wikiExtract && ctx.wikiTitle) {
+        _addWikipediaSection(wikiExtract, ctx.wikiTitle, ctx.wikiLang, body);
+        body.appendChild(_divider());
+    }
+
+    // 3. Relationship block (Part of / Collection / From)
+    if (_addRelationsSection(ctx, body)) {
+        body.appendChild(_divider());
+    }
+
+    // 4. Data sections
     _addTextsSection(entity, qid, ctx.wikiLang, body);
     _addImagesSection(entity, body);
     _addRecordsSection(entity, qid, body);
@@ -192,6 +186,65 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
     const tpl  = _config.institution?.footerNote ?? '{year}';
     note.innerHTML = `<span class="notabene">${tpl.replace('{year}', year)}</span>`;
     panel.appendChild(note);
+}
+
+// ── Relations section (Part of / Collection / Location / From) ────────────────
+
+function _addRelationsSection(ctx, container) {
+    const isArtwork = !!(ctx.collectionLabel || ctx.locationLabel);
+    let added = false;
+
+    if (isArtwork) {
+        // Collection or location (P195 / P276)
+        const locLabel  = ctx.collectionLabel || ctx.locationLabel;
+        const locQid    = ctx.p195Qid         || ctx.p276Qid;
+        const locPrefix = ctx.collectionLabel ? 'Collection' : 'Location';
+        if (locLabel) {
+            _addRelationRow(container, locPrefix, [{ qid: locQid, label: locLabel }]);
+            added = true;
+        }
+        // Discovery (P189)
+        if (ctx.discoveryList?.length) {
+            _addRelationRow(container, 'From', ctx.discoveryList);
+            added = true;
+        }
+    }
+
+    // Part of (P361) — shown for any entity type that has it,
+    // not mutually exclusive with artwork location/collection rows
+    if (ctx.partOfList?.length) {
+        _addRelationRow(container, 'Part of', ctx.partOfList);
+        added = true;
+    }
+
+    return added;
+}
+
+function _addRelationRow(container, prefix, list) {
+    const row = document.createElement('div');
+    row.className = 'relation-row';
+
+    const lbl = document.createElement('span');
+    lbl.className   = 'relation-label';
+    lbl.textContent = prefix + ':';
+    row.appendChild(lbl);
+
+    const links = document.createElement('span');
+    links.className = 'relation-links';
+    list.forEach(item => {
+        const a = document.createElement('a');
+        a.className    = 'relation-link';
+        a.href         = `?q=${item.qid}`;
+        a.dataset.qid  = item.qid;
+        a.textContent  = item.label;
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            openEntity(item.qid);
+        });
+        links.appendChild(a);
+    });
+    row.appendChild(links);
+    container.appendChild(row);
 }
 
 // ── Side panel button ─────────────────────────────────────────────────────────
@@ -222,7 +275,7 @@ function _addThumbnail(entity, container) {
     container.appendChild(div);
 }
 
-// ── Header ────────────────────────────────────────────────────────────────────
+// ── Header — title, type, QID only ───────────────────────────────────────────
 
 function _addHeader(entity, qid, container, ctx) {
     const countryMap = _config.wikidata?.countryLanguageMap ?? {};
@@ -230,61 +283,23 @@ function _addHeader(entity, qid, container, ctx) {
     const label      = getBestLabel(entity, countryMap, langOrder);
     const cap        = s => s ? capitalize(s) : '';
 
+    const h1 = document.createElement('h1');
+
+    const locStr   = ctx.adminLabel;
+    const typeLine = ctx.instanceLabel
+        ? (locStr
+            ? `<br/><small>${cap(ctx.instanceLabel)} in ${locStr}</small>`
+            : `<br/><small>${cap(ctx.instanceLabel)}</small>`)
+        : (locStr ? `<br/><small>${locStr}</small>` : '');
+
+    const invPart = ctx.invNum
+        ? `<br/><small class="inventory-num">Inv.\u00a0${ctx.invNum}</small>`
+        : '';
+
     const qidLine = `<br/><small><a class="qid-link"
         href="https://www.wikidata.org/wiki/${qid}" target="_blank">${qid}</a></small>`;
 
-    const isArtwork = !!(ctx.collectionLabel || ctx.locationLabel);
-
-    const h1 = document.createElement('h1');
-
-    // Helper: render a labelled row of location buttons
-    const btnRow = (prefix, list) => {
-        if (!list?.length) return '';
-        const btns = list
-            .map(p => `<a class="location-link location-btn" href="?q=${p.qid}" data-qid="${p.qid}">${p.label}</a>`)
-            .join('');
-        return `<small class="prop-prefix">${prefix}</small>${btns}`;
-    };
-
-    if (isArtwork) {
-        const locLabel  = ctx.collectionLabel || ctx.locationLabel;
-        const locQid    = ctx.p195Qid         || ctx.p276Qid;
-        const locPrefix = ctx.collectionLabel ? 'Collection:' : 'Location:';
-        const locRow    = locLabel
-            ? `<small class="prop-prefix">${locPrefix}</small><a class="location-link location-btn" href="?q=${locQid}" data-qid="${locQid}">${locLabel}</a>`
-            : '';
-
-        const typeParts = [cap(ctx.instanceLabel), ctx.invNum ? `Inv.\u00a0${ctx.invNum}` : ''].filter(Boolean);
-        const typeLine  = typeParts.length ? `<br/><small>${typeParts.join(', ')}</small>` : '';
-
-        const discoveryRow = btnRow('From:', ctx.discoveryList);
-
-        h1.innerHTML = `${locRow}${label}${typeLine}${qidLine}${discoveryRow ? '<br/>' + discoveryRow : ''}`;
-
-    } else {
-        const partOfRow = btnRow('Part of:', ctx.partOfList);
-
-        const locStr   = ctx.adminLabel;
-        const typeLine = ctx.instanceLabel
-            ? (locStr
-                ? `<br/><small>${cap(ctx.instanceLabel)} in ${locStr}</small>`
-                : `<br/><small>${cap(ctx.instanceLabel)}</small>`)
-            : (locStr ? `<br/><small>${locStr}</small>` : '');
-
-        const invPart = ctx.invNum
-            ? `<br/><small class="inventory-num">Inv.\u00a0${ctx.invNum}</small>`
-            : '';
-
-        h1.innerHTML = `${partOfRow}${label}${typeLine}${invPart}${qidLine}`;
-    }
-
-    h1.querySelectorAll('.location-link').forEach(a => {
-        a.addEventListener('click', e => {
-            e.preventDefault();
-            openEntity(a.dataset.qid);
-        });
-    });
-
+    h1.innerHTML = `${label}${typeLine}${invPart}${qidLine}`;
     container.appendChild(h1);
 }
 
@@ -341,72 +356,94 @@ function _addWikipediaSection(extract, wikiTitle, lang, container) {
     container.appendChild(div);
 }
 
-// ── Texts section ─────────────────────────────────────────────────────────────
+// ── Texts / Images / Records sections ────────────────────────────────────────
+// Links rendered as plain inline text links, no button borders.
 
 function _addTextsSection(entity, qid, wikiLang, container) {
     if (_config.infopad?.sections?.texts?.enabled === false) return;
 
-    const section = createSection('Texts');
     const sources = _config.infopad?.sections?.texts?.sources ?? [];
+    const links = [];
 
     for (const src of sources) {
         const val = _propValue(entity, src.property);
         if (!val || !_conditionMet(entity, src.condition)) continue;
-        createResourceButton(section, src.label, expandUrl(src.url, val, qid), src.own ?? false);
+        links.push({ label: src.label, url: expandUrl(src.url, val, qid), own: src.own });
     }
 
     if (_config.infopad?.wikipediaSummary !== false) {
         const title = entity.sitelinks?.[`${wikiLang}wiki`]?.title;
-        if (title) createResourceButton(
-            section, 'Wikipedia',
-            `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(title)}?useskin=Vector`
-        );
+        if (title) links.push({
+            label: 'Wikipedia',
+            url: `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(title)}?useskin=Vector`
+        });
     }
 
-    if (section.querySelector('button')) container.appendChild(section);
+    if (links.length) _addLinkRow(container, 'Texts', links);
 }
-
-// ── Images section ────────────────────────────────────────────────────────────
 
 function _addImagesSection(entity, container) {
     if (_config.infopad?.sections?.images?.enabled === false) return;
 
-    const section = createSection('Images');
     const imgConf = _config.infopad?.sections?.images ?? {};
     const sources = imgConf.sources ?? [];
+    const links = [];
 
     if (imgConf.wikimediaCommons !== false) {
         const cat = _propValue(entity, 'P373');
-        if (cat) createResourceButton(
-            section, 'Wikimedia',
-            `https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(cat)}`
-        );
+        if (cat) links.push({
+            label: 'Wikimedia',
+            url: `https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(cat)}`
+        });
     }
 
     for (const src of sources) {
         const val = _propValue(entity, src.property);
         if (!val || !_conditionMet(entity, src.condition)) continue;
-        createResourceButton(section, src.label, expandUrl(src.url, val), src.own ?? false);
+        links.push({ label: src.label, url: expandUrl(src.url, val), own: src.own });
     }
 
-    if (section.querySelector('button')) container.appendChild(section);
+    if (links.length) _addLinkRow(container, 'Images', links);
 }
-
-// ── Records section ───────────────────────────────────────────────────────────
 
 function _addRecordsSection(entity, qid, container) {
     if (_config.infopad?.sections?.records?.enabled === false) return;
 
-    const section = createSection('Records');
     const sources = _config.infopad?.sections?.records?.sources ?? [];
+    const links = [];
 
     for (const src of sources) {
         const val = _propValue(entity, src.property);
         if (!val || !_conditionMet(entity, src.condition)) continue;
-        createResourceButton(section, src.label, expandUrl(src.url, val, qid), src.own ?? false);
+        links.push({ label: src.label, url: expandUrl(src.url, val, qid), own: src.own });
     }
 
-    if (section.querySelector('button')) container.appendChild(section);
+    if (links.length) _addLinkRow(container, 'Records', links);
+}
+
+// ── Link row renderer (label: link link link) ─────────────────────────────────
+
+function _addLinkRow(container, prefix, links) {
+    const row = document.createElement('div');
+    row.className = 'link-row';
+
+    const lbl = document.createElement('span');
+    lbl.className   = 'link-row-label';
+    lbl.textContent = prefix + ':';
+    row.appendChild(lbl);
+
+    const span = document.createElement('span');
+    span.className = 'link-row-links';
+    links.forEach(link => {
+        const a = document.createElement('a');
+        a.href        = link.url;
+        a.target      = '_blank';
+        a.textContent = link.label;
+        a.className   = 'inline-link' + (link.own ? ' inline-link-own' : '');
+        span.appendChild(a);
+    });
+    row.appendChild(span);
+    container.appendChild(row);
 }
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────

@@ -221,7 +221,7 @@ div#myData::before {
    ============================================================================ */
 
 .panel-body {
-    padding: var(--spacing-md) calc(var(--spacing-lg) + 0.25rem) 0.25rem;
+    padding: var(--spacing-md) calc(var(--spacing-lg) + 0.25rem) 0.25rem var(--spacing-lg);
 }
 
 .panel-body > p { margin: 0; }
@@ -666,6 +666,96 @@ a.discovery-btn {
 }
 
 #gh-lb-close:hover { background: rgba(0,0,0,0.7); }
+
+
+/* ============================================================================
+   RELATION ROWS (Part of / Collection / Location / From)
+   ============================================================================ */
+
+.relation-row {
+    display: grid;
+    grid-template-columns: 5rem 1fr;
+    gap: 0.25rem 0.5rem;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+}
+
+.relation-label {
+    font-family: var(--font-ui);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding-top: 0.15rem;
+    white-space: nowrap;
+}
+
+.relation-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.relation-link {
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--navy-light);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.relation-link:hover { text-decoration: underline; color: var(--navy); }
+
+/* ============================================================================
+   LINK ROWS (Texts / Images / Records)
+   ============================================================================ */
+
+.link-row {
+    display: grid;
+    grid-template-columns: 5rem 1fr;
+    gap: 0.25rem 0.5rem;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+}
+
+.link-row-label {
+    font-family: var(--font-ui);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding-top: 0.15rem;
+}
+
+.link-row-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.6rem;
+    align-items: center;
+}
+
+.inline-link {
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--navy-light);
+    text-decoration: none;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+}
+
+.inline-link:hover { text-decoration: underline; color: var(--navy); }
+
+.inline-link-own {
+    color: var(--accent);
+    border-bottom: 1.5px solid var(--accent);
+}
+
+.inline-link-own:hover { color: var(--accent-hover); }
 
 /* ============================================================================
    FOOTER NOTE
