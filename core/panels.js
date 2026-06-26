@@ -167,19 +167,22 @@ function _buildTable(rows) {
     rows.forEach(row => {
         const qid   = (row.item?.value || '').replace('http://www.wikidata.org/entity/', '');
         const label = row.itemLabel?.value || qid;
-        const img   = row.image?.value
+        const imgThumb = row.image?.value
             ? row.image.value.replace('http://', 'https://') + '?width=60'
+            : null;
+        const imgLarge = row.image?.value
+            ? row.image.value.replace('http://', 'https://') + '?width=600'
             : null;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td class="lh-img-cell">
-                <img src="${img || ''}" alt="" loading="lazy"
-                     style="${img ? '' : 'visibility:hidden'}"/>
+                <img src="${imgThumb || ''}" alt="" loading="lazy"
+                     style="${imgThumb ? 'cursor:zoom-in' : 'visibility:hidden'}"/>
             </td>
             <td class="lh-label-cell">
                 <a class="lh-link" href="?q=${qid}" data-qid="${qid}">${_esc(label)}</a>
-                <br/><span class="lh-qid">${qid}</span>
+                <br/><a class="lh-qid" href="https://www.wikidata.org/wiki/${qid}" target="_blank">${qid}</a>
             </td>`;
 
         tr.querySelector('.lh-link').addEventListener('click', e => {
@@ -187,10 +190,10 @@ function _buildTable(rows) {
             openEntity(qid);
         });
 
-        if (img) {
-            tr.querySelector('img').addEventListener('error', function () {
-                this.style.visibility = 'hidden';
-            });
+        if (imgThumb) {
+            const imgEl = tr.querySelector('img');
+            imgEl.addEventListener('click', () => showLightbox(imgLarge, label));
+            imgEl.addEventListener('error', function () { this.style.visibility = 'hidden'; });
         }
 
         table.appendChild(tr);
@@ -252,41 +255,7 @@ function _runDepictedBy(qid, rows) {
     panel.style.display    = 'block';
     panel.style.visibility = 'visible';
 
-    rows.forEach(row => {
-        const itemQid  = (row.item?.value || '').replace('http://www.wikidata.org/entity/', '');
-        const label    = row.itemLabel?.value || itemQid;
-        const imgUrl   = row.image?.value ? row.image.value.replace('http://', 'https://') : null;
-        const thumb    = imgUrl ? imgUrl + '?width=60'  : null;
-        const large    = imgUrl ? imgUrl + '?width=600' : null;
-
-        const cell = document.createElement('div');
-        cell.className = 'db-row';
-
-        const thumbDiv = document.createElement('div');
-        thumbDiv.className = 'db-thumb';
-        if (thumb) {
-            const img = document.createElement('img');
-            img.src     = thumb;
-            img.loading = 'lazy';
-            img.alt     = '';
-            img.addEventListener('click', () => showLightbox(large, label));
-            img.addEventListener('error', function() { this.style.visibility = 'hidden'; });
-            thumbDiv.appendChild(img);
-        }
-        cell.appendChild(thumbDiv);
-
-        const labelDiv = document.createElement('div');
-        labelDiv.className = 'db-label';
-        const a = document.createElement('a');
-        a.href          = `?q=${itemQid}`;
-        a.dataset.qid   = itemQid;
-        a.textContent   = label;
-        a.addEventListener('click', e => { e.preventDefault(); openEntity(itemQid); });
-        labelDiv.appendChild(a);
-        cell.appendChild(labelDiv);
-
-        panel.appendChild(cell);
-    });
+    panel.appendChild(_buildTable(rows));
 }
 
 function _hideLocatedHerePanel() {

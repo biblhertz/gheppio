@@ -189,7 +189,7 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
     }
 
     // Parts & contents button — always present
-    _addSidePanelBtn(body, 'Parts & contents', 'gheppio:located-here', { locationQID: qid, qid });
+    _addSidePanelBtn(body, 'Check for Parts & contents', 'gheppio:located-here', { locationQID: qid, qid });
 
     // Depicted by button — inserted once depictedBy resolves with results
     depictedByPromise.then(rows => {
