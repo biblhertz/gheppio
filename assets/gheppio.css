@@ -401,6 +401,10 @@ button.location-btn {
     margin-bottom: 0.35rem !important;
 }
 
+#myData .panel-body > button.location-btn:first-child {
+    margin-top: 1rem !important;
+}
+
 /* Part-of breadcrumb buttons in h1 — stacked vertically */
 #myData h1 > a.location-btn {
     display: block !important;
@@ -497,6 +501,7 @@ button.location-btn:hover {
 
 
 /* Discovery provenance (P189 location of discovery) */
+small.prop-prefix,
 small.discovery-prefix {
     font-family: var(--font-ui);
     font-size: 0.6rem;

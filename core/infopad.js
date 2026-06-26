@@ -31,10 +31,7 @@ import {
 let _config = null;
 let _map    = null;
 
-// Extension infopad-section hooks: [{ id, fn }]
 const _sectionHooks = [];
-
-// Lightbox element (created lazily)
 let _lbEl = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -65,7 +62,6 @@ export async function openEntity(qid) {
         const entity = await fetchEntity(qid);
         if (!entity) throw new Error('Entity not found: ' + qid);
 
-        // ── Language setup ────────────────────────────────────────────────────
         const langOrder  = _config.wikidata?.fetchLanguages     ?? ['en'];
         const countryMap = _config.wikidata?.countryLanguageMap ?? {};
         const countryQid = _claimQid(entity, 'P17');
@@ -74,20 +70,17 @@ export async function openEntity(qid) {
         const langFull   = buildLangOrder(wikiLang, langOrder);
         const wikiTitle  = entity.sitelinks?.[`${wikiLang}wiki`]?.title ?? null;
 
-        // ── Claim extraction ──────────────────────────────────────────────────
-        const p131Qid  = _claimQid(entity, 'P131');  // admin territory
-        const p276Qid  = _claimQid(entity, 'P276');  // location
-        const p31Qid   = _claimQid(entity, 'P31');   // instance of
-        const p195Qid  = _claimQid(entity, 'P195');  // collection
+        const p131Qid  = _claimQid(entity, 'P131');
+        const p276Qid  = _claimQid(entity, 'P276');
+        const p31Qid   = _claimQid(entity, 'P31');
+        const p195Qid  = _claimQid(entity, 'P195');
         const hasP625  = !!entity.claims?.P625;
         const hasP527  = !!(entity.claims?.P527?.length);
         const invNum   = entity.claims?.P217?.[0]?.mainsnak?.datavalue?.value ?? '';
 
-        // All P361 (part of) and P189 (location of discovery) values
         const p361Qids = _claimQids(entity, 'P361');
         const p189Qids = _claimQids(entity, 'P189');
 
-        // ── Parallel label + Wikipedia fetch ──────────────────────────────────
         const [
             adminLabel, locationLabel, instanceLabel, collectionLabel,
             p361Label0, p189Label0,
@@ -99,13 +92,10 @@ export async function openEntity(qid) {
             p195Qid ? fetchLabel(p195Qid, langFull) : Promise.resolve(''),
             p361Qids[0] ? fetchLabel(p361Qids[0], langFull) : Promise.resolve(''),
             p189Qids[0] ? fetchLabel(p189Qids[0], langFull) : Promise.resolve(''),
-            // Remaining P361 values
             ...p361Qids.slice(1).map(id => fetchLabel(id, langFull)),
-            // Remaining P189 values
             ...p189Qids.slice(1).map(id => fetchLabel(id, langFull)),
         ]);
 
-        // Split extraLabels into P361 and P189 extras
         const p361Extra = extraLabels.slice(0, p361Qids.length - 1);
         const p189Extra = extraLabels.slice(p361Qids.length - 1);
 
@@ -117,15 +107,12 @@ export async function openEntity(qid) {
             .map((id, i) => ({ qid: id, label: i === 0 ? p189Label0 : (p189Extra[i - 1] || '') }))
             .filter(d => d.label);
 
-        // Wikipedia extract (blocking — needed before render)
         const wikiExtract = (wikiTitle && _config.infopad?.wikipediaSummary !== false)
             ? await fetchWikipediaExtract(wikiTitle, wikiLang)
             : null;
 
-        // Depicted-by — non-blocking, resolves after panel renders
         const depictedByPromise = fetchDepictedBy(qid, _config.sparql.proxy);
 
-        // ── Render ────────────────────────────────────────────────────────────
         _centerMap(entity);
         panel.innerHTML = '';
 
@@ -138,7 +125,6 @@ export async function openEntity(qid) {
 
         _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise);
 
-        // Extension hooks
         for (const hook of _sectionHooks) {
             try {
                 const el = hook.fn(entity, qid, _config, {
@@ -188,10 +174,8 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
         _addWikipediaSection(wikiExtract, ctx.wikiTitle, ctx.wikiLang, body);
     }
 
-    // Parts & contents button — always present
     _addSidePanelBtn(body, 'Check for Parts & contents', 'gheppio:located-here', { locationQID: qid, qid });
 
-    // Depicted by button — inserted once depictedBy resolves with results
     depictedByPromise.then(rows => {
         if (!rows.length) return;
         _addSidePanelBtn(body, 'Depicted by', 'gheppio:depicted-by', { qid, rows });
@@ -203,7 +187,6 @@ function _buildPanel(panel, entity, qid, wikiExtract, ctx, depictedByPromise) {
     _addImagesSection(entity, body);
     _addRecordsSection(entity, qid, body);
 
-    // Footer
     const note = document.createElement('p');
     const year = new Date().getFullYear();
     const tpl  = _config.institution?.footerNote ?? '{year}';
@@ -220,7 +203,6 @@ function _addSidePanelBtn(container, label, eventName, detail) {
     btn.addEventListener('click', () => {
         window.dispatchEvent(new CustomEvent(eventName, { detail }));
     });
-    // Insert before the divider so both buttons stay grouped above the sections
     const divider = container.querySelector('hr.panel-divider');
     divider ? container.insertBefore(btn, divider) : container.appendChild(btn);
 }
@@ -230,10 +212,13 @@ function _addSidePanelBtn(container, label, eventName, detail) {
 function _addThumbnail(entity, container) {
     const val = entity.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
     if (!val) return;
-    const div = document.createElement('div');
+    const base  = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(val)}`;
+    const large = base + '?width=1200';
+    const div   = document.createElement('div');
     div.id = 'gh-thumb';
-    div.innerHTML = `<img alt="[reference image]"
-        src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(val)}?width=160"/>`;
+    div.style.cursor = 'zoom-in';
+    div.innerHTML = `<img alt="[reference image]" src="${base}?width=160"/>`;
+    div.addEventListener('click', () => showLightbox(large, val.replace(/_/g, ' ')));
     container.appendChild(div);
 }
 
@@ -248,36 +233,36 @@ function _addHeader(entity, qid, container, ctx) {
     const qidLine = `<br/><small><a class="qid-link"
         href="https://www.wikidata.org/wiki/${qid}" target="_blank">${qid}</a></small>`;
 
-    // Artwork: has a collection (P195) or located-in a building without own coordinates
     const isArtwork = !!(ctx.collectionLabel || ctx.locationLabel);
 
     const h1 = document.createElement('h1');
 
+    // Helper: render a labelled row of location buttons
+    const btnRow = (prefix, list) => {
+        if (!list?.length) return '';
+        const btns = list
+            .map(p => `<a class="location-link location-btn" href="?q=${p.qid}" data-qid="${p.qid}">${p.label}</a>`)
+            .join('');
+        return `<small class="prop-prefix">${prefix}</small>${btns}`;
+    };
+
     if (isArtwork) {
-        const locLabel = ctx.collectionLabel || ctx.locationLabel;
-        const locQid   = ctx.p195Qid         || ctx.p276Qid;
-        const locBtn   = locLabel
-            ? `<a class="location-link location-btn" href="?q=${locQid}" data-qid="${locQid}">${locLabel}</a><br/>`
+        const locLabel  = ctx.collectionLabel || ctx.locationLabel;
+        const locQid    = ctx.p195Qid         || ctx.p276Qid;
+        const locPrefix = ctx.collectionLabel ? 'Collection:' : 'Location:';
+        const locRow    = locLabel
+            ? `<small class="prop-prefix">${locPrefix}</small><a class="location-link location-btn" href="?q=${locQid}" data-qid="${locQid}">${locLabel}</a>`
             : '';
 
         const typeParts = [cap(ctx.instanceLabel), ctx.invNum ? `Inv.\u00a0${ctx.invNum}` : ''].filter(Boolean);
         const typeLine  = typeParts.length ? `<br/><small>${typeParts.join(', ')}</small>` : '';
 
-        const discoveryBtns = ctx.discoveryList?.length
-            ? '<br/><small class="discovery-prefix">From:</small><br/>' +
-            ctx.discoveryList
-                .map(d => `<a class="location-link location-btn" href="?q=${d.qid}" data-qid="${d.qid}">${d.label}</a>`)
-                .join('<br/>')
-            : '';
+        const discoveryRow = btnRow('From:', ctx.discoveryList);
 
-        h1.innerHTML = `${locBtn}${label}${typeLine}${discoveryBtns}${qidLine}`;
+        h1.innerHTML = `${locRow}${label}${typeLine}${qidLine}${discoveryRow ? '<br/>' + discoveryRow : ''}`;
 
     } else {
-        const partOfBtns = ctx.partOfList?.length
-            ? ctx.partOfList
-            .map(p => `<a class="location-link location-btn" href="?q=${p.qid}" data-qid="${p.qid}">${p.label}</a>`)
-            .join(' ') + '<br/>'
-            : '';
+        const partOfRow = btnRow('Part of:', ctx.partOfList);
 
         const locStr   = ctx.adminLabel;
         const typeLine = ctx.instanceLabel
@@ -290,10 +275,9 @@ function _addHeader(entity, qid, container, ctx) {
             ? `<br/><small class="inventory-num">Inv.\u00a0${ctx.invNum}</small>`
             : '';
 
-        h1.innerHTML = `${partOfBtns}${label}${typeLine}${invPart}${qidLine}`;
+        h1.innerHTML = `${partOfRow}${label}${typeLine}${invPart}${qidLine}`;
     }
 
-    // SPA navigation for all .location-link anchors
     h1.querySelectorAll('.location-link').forEach(a => {
         a.addEventListener('click', e => {
             e.preventDefault();
@@ -471,7 +455,7 @@ function _showPanel(panel) {
     panel.style.visibility = 'visible';
     panel.style.display    = 'block';
     panel.classList.remove('panel-leaving', 'panel-entering');
-    void panel.offsetWidth; // force reflow
+    void panel.offsetWidth;
     panel.classList.add('panel-entering');
     document.body.classList.add('panel-open');
     _setupSwipeToClose(panel);
