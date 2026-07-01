@@ -241,10 +241,17 @@ async function _desktopLocatedHere(locationQID, qid) {
     }
 }
 
-
 // ── Depicted By ───────────────────────────────────────────────────────────────
 
 function _runDepictedBy(qid, rows) {
+    if (window.innerWidth <= 768) {
+        _mobileDepictedBy(qid, rows);
+    } else {
+        _desktopDepictedBy(qid, rows);
+    }
+}
+
+function _desktopDepictedBy(qid, rows) {
     let panel = document.getElementById('located-here-panel');
     if (!panel) {
         panel = document.createElement('div');
@@ -254,8 +261,34 @@ function _runDepictedBy(qid, rows) {
     panel.innerHTML = '';
     panel.style.display    = 'block';
     panel.style.visibility = 'visible';
-
     panel.appendChild(_buildTable(rows));
+}
+
+function _mobileDepictedBy(qid, rows) {
+    const mainPanel = document.getElementById('myData');
+    if (!mainPanel) return;
+
+    const buildingName = (mainPanel.querySelector('h1')?.firstChild?.textContent || '').trim();
+    mainPanel.innerHTML = '';
+
+    const header  = document.createElement('div');
+    header.className = 'lh-mobile-header';
+    const backBtn = document.createElement('button');
+    backBtn.className = 'lh-back-btn';
+    backBtn.innerHTML = '\u2190\u2002' + (buildingName || 'Back');
+    backBtn.addEventListener('click', () => openEntity(qid));
+    header.appendChild(backBtn);
+    mainPanel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'panel-body';
+    mainPanel.appendChild(body);
+
+    if (!rows.length) {
+        body.innerHTML = '<p class="lh-empty">Nothing found.</p>';
+        return;
+    }
+    body.appendChild(_buildTable(rows));
 }
 
 function _hideLocatedHerePanel() {
